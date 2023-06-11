@@ -129,15 +129,20 @@
 {%- endmacro -%}
 
 {% macro clickhouse__create_table_as(temporary, relation, sql) -%}
-    {% set create_table = create_table_or_empty(temporary, relation, sql) %}
-    {% if adapter.is_before_version('22.7.1.2484') -%}
-        {{ create_table }}
+  {%- set create_table = create_table_or_empty(temporary, relation, sql) -%}
+  {%- set split_phrase = config.get('split_phrase', none) -%}
+  {% if adapter.is_before_version('22.7.1.2484') -%}
+    {{ create_table }}
+  {%- else %}
+    {% call statement('create_table_empty') %}
+      {{ create_table }}
+    {% endcall %}
+    {%- if split_phrase and split_phrase in sql -%}
+      {{ clickhouse__insert_into_split_union(relation.include(database=False), sql) }}
     {%- else %}
-        {% call statement('create_table_empty') %}
-            {{ create_table }}
-        {% endcall %}
-        {{ clickhouse__insert_into(relation.include(database=False), sql) }}
+      {{ clickhouse__insert_into(relation.include(database=False), sql) }}
     {%- endif %}
+  {%- endif %}
 {%- endmacro %}
 
 {% macro create_table_or_empty(temporary, relation, sql) -%}
@@ -174,4 +179,21 @@
 
   insert into {{ target_relation }} ({{ dest_cols_csv }})
   {{ sql }}
+{%- endmacro %}
+
+{% macro clickhouse__insert_into_split_union(target_relation, sql) %}
+  {%- set dest_columns = adapter.get_columns_in_relation(target_relation) -%}
+  {%- set dest_cols_csv = dest_columns | map(attribute='quoted') | join(', ') -%}
+  {%- set list = sql.split('union all') -%}
+  {%- for select_section in list -%}
+    {%- if not loop.last -%}
+      {%- call statement('insert_statement') -%}
+        insert into {{ target_relation }} ({{ dest_cols_csv }})
+        {{ select_section }}
+      {%- endcall -%}
+    {%- else -%}
+      insert into {{ target_relation }} ({{ dest_cols_csv }})
+      {{ select_section }}
+    {%- endif -%}
+  {%- endfor -%}
 {%- endmacro %}
