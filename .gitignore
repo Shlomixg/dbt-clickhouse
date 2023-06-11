@@ -27,6 +27,8 @@ var/
 *.egg
 *.mypy_cache/
 logs/
+.cache
+poetry.lock
 
 # PyInstaller
 #  Usually these files are written by a python script from a template
